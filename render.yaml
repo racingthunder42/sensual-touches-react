@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: sensual-touches
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    maxShutdownDelaySeconds: 30
+    disk:
+      name: support-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      - key: CHAT_DATABASE_PATH
+        value: /var/data/support.sqlite
+      - key: CHAT_AUTH_SECRET
+        generateValue: true
+      - key: BOOKING_MIN_LEAD_MINUTES
+        value: "30"
+      - key: APP_ORIGIN
+        sync: false
+      - key: BOOKING_TIMEZONE_OFFSET
+        sync: false
+      - key: AGENT_ACCOUNTS
+        sync: false
+      - key: CASHAPP_PAYMENT_DESTINATION
+        sync: false
+      - key: VENMO_PAYMENT_DESTINATION
+        sync: false
+      - key: BITCOIN_PAYMENT_DESTINATION
+        sync: false
+      - key: ZELLE_PAYMENT_DESTINATION
+        sync: false
+      - key: APPLE_PAY_PAYMENT_DESTINATION
+        sync: false
+      - key: CHIME_PAYMENT_DESTINATION
+        sync: false
+      - key: PAYPAL_PAYMENT_DESTINATION
+        sync: false

@@ -1,0 +1,28 @@
+{
+  "name": "sensual-touches-react",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:client": "vite",
+    "dev:server": "node --watch server/index.js",
+    "build": "vite build",
+    "hash-password": "node scripts/hash-password.js",
+    "preview": "vite preview",
+    "start": "node server/index.js",
+    "verify:support": "node scripts/verify-support.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "vite": "^7.2.2"
+  }
+}
