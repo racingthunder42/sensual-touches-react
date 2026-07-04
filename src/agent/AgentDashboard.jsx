@@ -299,10 +299,13 @@ export default function AgentDashboard() {
           {pendingBookings.map((booking) => (
             <article className="payment-queue-item" key={booking.id}>
               <div className="payment-queue-summary">
-                <strong>{booking.name}</strong>
-                <span>{booking.paymentMethod} · $150</span>
-                <small>{booking.service} · {booking.masseuseName}</small>
-                <code>{booking.paymentReference}</code>
+                <strong>Client: {booking.name}</strong>
+                <span>{booking.paymentMethod} · $150 awaiting confirmation</span>
+                <small>Appointment: {booking.date} at {booking.time}</small>
+                <small>Service: {booking.service}</small>
+                <small>Masseuse: {booking.masseuseName}</small>
+                {booking.notes && <small>Notes: {booking.notes}</small>}
+                <code>Payment reference: {booking.paymentReference}</code>
               </div>
               <button
                 className="btn-primary agent-small-button"
@@ -313,7 +316,7 @@ export default function AgentDashboard() {
               </button>
             </article>
           ))}
-          <details className="payment-history">
+          <details className="payment-history" open>
             <summary>
               <span>Payment History</span>
               <strong>{confirmedBookings.length}</strong>
@@ -324,11 +327,21 @@ export default function AgentDashboard() {
             {confirmedBookings.map((booking) => (
               <article className="payment-queue-item confirmed" key={booking.id}>
                 <div className="payment-queue-summary">
-                  <strong>{booking.name}</strong>
+                  <strong>Client: {booking.name}</strong>
                   <span>{booking.paymentMethod} · $150 confirmed</span>
-                  <small>{booking.service} · {booking.masseuseName}</small>
-                  <code>{booking.paymentReference}</code>
-                  {booking.bookingCode && <code>{booking.bookingCode}</code>}
+                  <small>Appointment: {booking.date} at {booking.time}</small>
+                  <small>Service: {booking.service}</small>
+                  <small>Masseuse: {booking.masseuseName}</small>
+                  {booking.notes && <small>Notes: {booking.notes}</small>}
+                  <code>Payment reference: {booking.paymentReference}</code>
+                  {booking.bookingCode && (
+                    <code>Booking code: {booking.bookingCode}</code>
+                  )}
+                  {booking.confirmedAt && (
+                    <small>
+                      Confirmed: {new Date(booking.confirmedAt).toLocaleString()}
+                    </small>
+                  )}
                 </div>
               </article>
             ))}

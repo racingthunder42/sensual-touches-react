@@ -760,11 +760,9 @@
   .payment-queue-summary strong { color: var(--text-light); font-size: 0.86rem; }
   .payment-queue-summary span { color: var(--teal); font-size: 0.75rem; }
   .payment-queue-summary small {
-    overflow: hidden;
     color: var(--text-muted);
     font-size: 0.7rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
   .payment-queue-summary code {
     color: var(--gold);
