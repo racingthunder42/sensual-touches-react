@@ -656,16 +656,13 @@ function Chat() {
 
 export default function App() {
   const [masseuses, setMasseuses] = useState([]);
-  const [booking, setBooking] = useState(() => {
-    try {
-      const saved = window.localStorage.getItem("lotus-active-booking");
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [booking, setBooking] = useState(null);
 
   useEffect(() => {
+    window.localStorage.removeItem("lotus-active-booking");
+    window.history.replaceState(null, "", window.location.pathname);
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+
     let cancelled = false;
     apiRequest("/api/masseuses")
       .then(({ masseuses: availableMasseuses }) => {
@@ -677,13 +674,6 @@ export default function App() {
       cancelled = true;
     };
   }, []);
-  useEffect(() => {
-    if (booking) {
-      window.localStorage.setItem("lotus-active-booking", JSON.stringify(booking));
-    } else {
-      window.localStorage.removeItem("lotus-active-booking");
-    }
-  }, [booking]);
 
   return (
     <>
