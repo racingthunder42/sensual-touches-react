@@ -5,6 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { createClient } from "@supabase/supabase-js";
 import rateLimit from "express-rate-limit";
 import express from "express";
 import helmet from "helmet";
@@ -13,12 +14,15 @@ import { Server } from "socket.io";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const isProduction = process.env.NODE_ENV === "production";
+const supabaseConfigured = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
 const requiredProductionVariables = [
-  "AGENT_ACCOUNTS", "APP_ORIGIN", "CHAT_AUTH_SECRET", "CHAT_DATABASE_PATH",
-  "CASHAPP_PAYMENT_DESTINATION", "VENMO_PAYMENT_DESTINATION",
-  "BITCOIN_PAYMENT_DESTINATION", "ZELLE_PAYMENT_DESTINATION",
-  "APPLE_PAY_PAYMENT_DESTINATION", "CHIME_PAYMENT_DESTINATION",
-  "PAYPAL_PAYMENT_DESTINATION",
+  "APP_ORIGIN", "CHAT_DATABASE_PATH", "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY", "CASHAPP_PAYMENT_DESTINATION",
+  "VENMO_PAYMENT_DESTINATION", "BITCOIN_PAYMENT_DESTINATION",
+  "ZELLE_PAYMENT_DESTINATION", "APPLE_PAY_PAYMENT_DESTINATION",
+  "CHIME_PAYMENT_DESTINATION", "PAYPAL_PAYMENT_DESTINATION",
 ];
 const missingProductionVariables = requiredProductionVariables.filter(
   (name) => !process.env[name],
@@ -26,7 +30,7 @@ const missingProductionVariables = requiredProductionVariables.filter(
 if (isProduction && missingProductionVariables.length) {
   throw new Error(`Missing required production environment variables: ${missingProductionVariables.join(", ")}`);
 }
-if (isProduction && process.env.CHAT_AUTH_SECRET.length < 32) {
+if (isProduction && !supabaseConfigured && process.env.CHAT_AUTH_SECRET.length < 32) {
   throw new Error("CHAT_AUTH_SECRET must contain at least 32 characters.");
 }
 const dataDirectory = path.join(projectRoot, "data");
@@ -131,7 +135,10 @@ app.use(helmet({
     "style-src": ["'self'", "https://fonts.googleapis.com"],
     "font-src": ["'self'", "https://fonts.gstatic.com", "data:"],
     "img-src": ["'self'", "data:"],
-    "connect-src": ["'self'", "ws:", "wss:"],
+    "connect-src": [
+      "'self'", "ws:", "wss:",
+      ...(process.env.SUPABASE_URL ? [new URL(process.env.SUPABASE_URL).origin] : []),
+    ],
     "object-src": ["'none'"],
   }},
 }));
@@ -176,6 +183,7 @@ const paymentDestinations = new Map([
 ]);
 
 function loadAgentAccounts() {
+  if (supabaseConfigured) return [];
   if (!process.env.AGENT_ACCOUNTS) {
     console.warn(
       "[support] AGENT_ACCOUNTS is not configured. Development logins are enabled; do not expose this server publicly.",
@@ -213,15 +221,42 @@ function loadAgentAccounts() {
   return normalizedAccounts;
 }
 
+const supabaseAdmin = supabaseConfigured
+  ? createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } },
+    )
+  : null;
 const agentAccounts = loadAgentAccounts();
 const agentsById = new Map(agentAccounts.map((agent) => [agent.id, agent]));
-const defaultAgentId = agentAccounts[0].id;
-database
-  .prepare("UPDATE conversations SET assigned_agent_id = ? WHERE assigned_agent_id IS NULL")
-  .run(defaultAgentId);
-database
-  .prepare("UPDATE bookings SET masseuse_id = ? WHERE masseuse_id IS NULL")
-  .run(defaultAgentId);
+
+async function refreshAgentProfiles() {
+  if (!supabaseAdmin) return agentAccounts;
+  const { data, error } = await supabaseAdmin
+    .from("agent_profiles")
+    .select("id, display_name")
+    .eq("active", true)
+    .order("display_name");
+  if (error) throw new Error(`Could not load Supabase agent profiles: ${error.message}`);
+  agentsById.clear();
+  for (const profile of data) {
+    agentsById.set(profile.id, { id: profile.id, name: profile.display_name });
+  }
+  return [...agentsById.values()];
+}
+
+if (supabaseConfigured) {
+  await refreshAgentProfiles();
+} else {
+  const defaultAgentId = agentAccounts[0].id;
+  database
+    .prepare("UPDATE conversations SET assigned_agent_id = ? WHERE assigned_agent_id IS NULL")
+    .run(defaultAgentId);
+  database
+    .prepare("UPDATE bookings SET masseuse_id = ? WHERE masseuse_id IS NULL")
+    .run(defaultAgentId);
+}
 
 const storedAgentIds = new Set([
   ...database.prepare(
@@ -231,7 +266,9 @@ const storedAgentIds = new Set([
     "SELECT DISTINCT masseuse_id AS id FROM bookings WHERE masseuse_id IS NOT NULL",
   ).all().map(({ id }) => id),
 ]);
-const removedAgentIds = [...storedAgentIds].filter((id) => !agentsById.has(id));
+const removedAgentIds = supabaseConfigured
+  ? []
+  : [...storedAgentIds].filter((id) => !agentsById.has(id));
 if (removedAgentIds.length) {
   const message = `Stored records reference removed agents: ${removedAgentIds.join(", ")}. Restore or reassign those IDs first.`;
   if (isProduction) throw new Error(message);
@@ -262,7 +299,23 @@ function createToken(agent) {
   return `${payload}.${signature}`;
 }
 
-function verifyToken(token) {
+async function verifyToken(token) {
+  if (supabaseAdmin) {
+    if (!token) return null;
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return null;
+    const { data: profile } = await supabaseAdmin
+      .from("agent_profiles")
+      .select("id, display_name, active")
+      .eq("id", user.id)
+      .eq("active", true)
+      .maybeSingle();
+    if (!profile?.display_name) return null;
+    const agent = { agentId: profile.id, name: profile.display_name };
+    agentsById.set(profile.id, { id: profile.id, name: profile.display_name });
+    return agent;
+  }
+
   if (!token || !token.includes(".")) return null;
   const [payload, signature] = token.split(".");
   const expected = crypto
@@ -289,12 +342,16 @@ function verifyToken(token) {
   }
 }
 
-function requireAgent(request, response, next) {
-  const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
-  const agent = verifyToken(token);
-  if (!agent) return response.status(401).json({ error: "Unauthorized" });
-  request.agent = agent;
-  next();
+async function requireAgent(request, response, next) {
+  try {
+    const token = request.headers.authorization?.replace(/^Bearer\s+/i, "");
+    const agent = await verifyToken(token);
+    if (!agent) return response.status(401).json({ error: "Unauthorized" });
+    request.agent = agent;
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 function verifyPassword(password, agent) {
@@ -467,17 +524,22 @@ app.get("/api/health", (_request, response) => {
   response.json({ ok: true });
 });
 
-app.get("/api/masseuses", (_request, response) => {
-  response.json({
-    masseuses: agentAccounts.map(({ id, name }) => ({ id, name })),
-  });
+app.get("/api/masseuses", async (_request, response, next) => {
+  try {
+    const agents = await refreshAgentProfiles();
+    response.json({
+      masseuses: agents.map(({ id, name }) => ({ id, name })),
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
 const bookingLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
 const chatLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
-app.post("/api/bookings", bookingLimiter, (request, response) => {
+app.post("/api/bookings", bookingLimiter, async (request, response) => {
   const clientToken = normalizeField(request.body.clientToken, 100);
   const name = normalizeField(request.body.name, 80);
   const date = normalizeField(request.body.date, 10);
@@ -485,6 +547,7 @@ app.post("/api/bookings", bookingLimiter, (request, response) => {
   const service = normalizeField(request.body.service, 160);
   const notes = normalizeField(request.body.notes, 1000);
   const masseuseId = normalizeField(request.body.masseuseId, 100);
+  if (supabaseConfigured) await refreshAgentProfiles();
   const paymentMethod = normalizeField(request.body.paymentMethod, 30);
   const paymentDestination = paymentDestinations.get(paymentMethod);
   const appointment = Date.parse(`${date}T${time}:00${process.env.BOOKING_TIMEZONE_OFFSET || "Z"}`);
@@ -569,7 +632,7 @@ app.get("/api/bookings/:id", (request, response) => {
   response.json({ booking: serializeBooking(booking) });
 });
 
-app.post("/api/chat/conversations", chatLimiter, (request, response) => {
+app.post("/api/chat/conversations", chatLimiter, async (request, response) => {
   const visitorId =
     typeof request.body.visitorId === "string"
       ? request.body.visitorId.slice(0, 100)
@@ -579,6 +642,7 @@ app.post("/api/chat/conversations", chatLimiter, (request, response) => {
       ? request.body.visitorName.trim().slice(0, 80)
       : "";
   const agentId = normalizeField(request.body.agentId, 100);
+  if (supabaseConfigured) await refreshAgentProfiles();
   if (!visitorId || !visitorName || !agentsById.has(agentId)) {
     return response
       .status(400)
@@ -642,6 +706,9 @@ app.get("/api/chat/conversations/:id/messages", (request, response) => {
 });
 
 app.post("/api/agent/login", loginLimiter, (request, response) => {
+  if (supabaseConfigured) {
+    return response.status(410).json({ error: "Sign in with your invited email address." });
+  }
   const { agentId, password } = request.body;
   const agent = agentsById.get(agentId);
   if (!agent || !verifyPassword(password, agent)) {
@@ -765,9 +832,9 @@ function broadcastPresence() {
   );
 }
 
-io.on("connection", (socket) => {
+io.on("connection", async (socket) => {
   const token = socket.handshake.auth?.token;
-  const agent = verifyToken(token);
+  const agent = await verifyToken(token);
 
   if (agent) {
     socket.data.agent = agent;

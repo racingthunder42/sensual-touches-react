@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { agentRequest, apiRequest } from "../lib/chatApi";
+import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 function mergeConversation(current, incoming) {
   const updated = current.some((item) => item.id === incoming.id)
@@ -43,14 +44,21 @@ function getVisitorLabel(conversation) {
 
 export default function AgentDashboard() {
   const [token, setToken] = useState(() =>
-    window.sessionStorage.getItem("lotus-agent-token"),
+    isSupabaseConfigured ? null : window.sessionStorage.getItem("lotus-agent-token"),
   );
   const [agent, setAgent] = useState(() => {
+    if (isSupabaseConfigured) return null;
     const saved = window.sessionStorage.getItem("lotus-agent");
     return saved ? JSON.parse(saved) : null;
   });
   const [credentials, setCredentials] = useState({
     agentId: "",
+    password: "",
+  });
+  const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [inviteSession, setInviteSession] = useState(null);
+  const [profileSetup, setProfileSetup] = useState({
+    displayName: "",
     password: "",
   });
   const [conversations, setConversations] = useState([]);
@@ -62,6 +70,64 @@ export default function AgentDashboard() {
   const selectedIdRef = useRef(null);
   const socketRef = useRef(null);
   const messageListRef = useRef(null);
+
+  const storeAgentSession = useCallback((session, profile) => {
+    const nextAgent = { id: profile.id, name: profile.display_name };
+    window.sessionStorage.setItem("lotus-agent-token", session.access_token);
+    window.sessionStorage.setItem("lotus-agent", JSON.stringify(nextAgent));
+    setToken(session.access_token);
+    setAgent(nextAgent);
+    setInviteSession(null);
+  }, []);
+
+  const loadSupabaseSession = useCallback(async (session) => {
+    if (!session) {
+      setAuthReady(true);
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("agent_profiles")
+      .select("id, display_name, active")
+      .eq("id", session.user.id)
+      .single();
+
+    if (profileError) {
+      setError(profileError.message);
+    } else if (!profile.active || !profile.display_name) {
+      setInviteSession(session);
+      setProfileSetup((current) => ({
+        ...current,
+        displayName: profile.display_name || "",
+      }));
+    } else {
+      storeAgentSession(session, profile);
+    }
+    setAuthReady(true);
+  }, [storeAgentSession]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let cancelled = false;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!cancelled) loadSupabaseSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === "TOKEN_REFRESHED" && session) {
+          window.sessionStorage.setItem("lotus-agent-token", session.access_token);
+          setToken(session.access_token);
+        }
+      },
+    );
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [loadSupabaseSession]);
 
   const selectedConversation = conversations.find(
     (conversation) => conversation.id === selectedId,
@@ -145,6 +211,16 @@ export default function AgentDashboard() {
     event.preventDefault();
     setError("");
     try {
+      if (isSupabaseConfigured) {
+        const { data, error: loginError } = await supabase.auth.signInWithPassword({
+          email: credentials.agentId.trim(),
+          password: credentials.password,
+        });
+        if (loginError) throw loginError;
+        await loadSupabaseSession(data.session);
+        return;
+      }
+
       const result = await apiRequest("/api/agent/login", {
         method: "POST",
         body: JSON.stringify(credentials),
@@ -158,11 +234,47 @@ export default function AgentDashboard() {
     }
   };
 
-  const logout = () => {
+  const completeProfile = async (event) => {
+    event.preventDefault();
+    const displayName = profileSetup.displayName.trim();
+    if (displayName.length < 2 || profileSetup.password.length < 12) {
+      setError("Use a display name and a password containing at least 12 characters.");
+      return;
+    }
+
+    setError("");
+    try {
+      const { error: passwordError } = await supabase.auth.updateUser({
+        password: profileSetup.password,
+      });
+      if (passwordError) throw passwordError;
+
+      const { data: profile, error: profileError } = await supabase
+        .from("agent_profiles")
+        .update({
+          display_name: displayName,
+          active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", inviteSession.user.id)
+        .select("id, display_name, active")
+        .single();
+      if (profileError) throw profileError;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      storeAgentSession(session, profile);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const logout = async () => {
+    if (isSupabaseConfigured) await supabase.auth.signOut();
     window.sessionStorage.removeItem("lotus-agent-token");
     window.sessionStorage.removeItem("lotus-agent");
     setToken(null);
     setAgent(null);
+    setInviteSession(null);
     setSelectedId(null);
     setConversations([]);
     setBookings([]);
@@ -216,6 +328,57 @@ export default function AgentDashboard() {
     );
   };
 
+  if (!authReady) {
+    return (
+      <main className="agent-login-page">
+        <div className="agent-login-card">Checking your invitationâ€¦</div>
+      </main>
+    );
+  }
+
+  if (inviteSession) {
+    return (
+      <main className="agent-login-page">
+        <form className="agent-login-card" onSubmit={completeProfile}>
+          <div className="footer-logo">Sensual touches</div>
+          <p className="section-label">Agent invitation</p>
+          <h1>Finish account setup</h1>
+          <label htmlFor="displayName">Masseuse name</label>
+          <input
+            id="displayName"
+            value={profileSetup.displayName}
+            onChange={(event) =>
+              setProfileSetup((current) => ({
+                ...current,
+                displayName: event.target.value,
+              }))
+            }
+            required
+          />
+          <label htmlFor="newAgentPassword">Create password</label>
+          <input
+            id="newAgentPassword"
+            type="password"
+            minLength="12"
+            value={profileSetup.password}
+            onChange={(event) =>
+              setProfileSetup((current) => ({
+                ...current,
+                password: event.target.value,
+              }))
+            }
+            autoComplete="new-password"
+            required
+          />
+          {error && <p className="form-error">{error}</p>}
+          <button className="btn-primary" type="submit">
+            Activate Account
+          </button>
+        </form>
+      </main>
+    );
+  }
+
   if (!token || !agent) {
     return (
       <main className="agent-login-page">
@@ -223,9 +386,10 @@ export default function AgentDashboard() {
           <div className="footer-logo">Sensual touches</div>
           <p className="section-label">Support dashboard</p>
           <h1>Agent sign in</h1>
-          <label htmlFor="agentId">Agent ID</label>
+          <label htmlFor="agentId">{isSupabaseConfigured ? "Email" : "Agent ID"}</label>
           <input
             id="agentId"
+            type={isSupabaseConfigured ? "email" : "text"}
             value={credentials.agentId}
             onChange={(event) =>
               setCredentials((current) => ({

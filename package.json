@@ -14,6 +14,7 @@
     "verify:support": "node scripts/verify-support.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.0",
     "@vitejs/plugin-react": "^4.7.0",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",

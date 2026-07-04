@@ -18,15 +18,20 @@ services:
         value: "1"
       - key: CHAT_DATABASE_PATH
         value: /var/data/support.sqlite
-      - key: CHAT_AUTH_SECRET
-        generateValue: true
+
       - key: BOOKING_MIN_LEAD_MINUTES
         value: "30"
       - key: APP_ORIGIN
         sync: false
       - key: BOOKING_TIMEZONE_OFFSET
         sync: false
-      - key: AGENT_ACCOUNTS
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
         sync: false
       - key: CASHAPP_PAYMENT_DESTINATION
         sync: false
