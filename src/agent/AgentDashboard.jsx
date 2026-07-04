@@ -265,6 +265,9 @@ export default function AgentDashboard() {
   const pendingBookings = bookings.filter(
     (booking) => booking.status === "pending_payment",
   );
+  const confirmedBookings = bookings.filter(
+    (booking) => booking.status === "confirmed",
+  );
 
   return (
     <main className="agent-dashboard">
@@ -310,6 +313,26 @@ export default function AgentDashboard() {
               </button>
             </article>
           ))}
+          <details className="payment-history">
+            <summary>
+              <span>Payment History</span>
+              <strong>{confirmedBookings.length}</strong>
+            </summary>
+            {confirmedBookings.length === 0 && (
+              <p className="agent-empty payment-empty">No confirmed payments yet.</p>
+            )}
+            {confirmedBookings.map((booking) => (
+              <article className="payment-queue-item confirmed" key={booking.id}>
+                <div className="payment-queue-summary">
+                  <strong>{booking.name}</strong>
+                  <span>{booking.paymentMethod} · $150 confirmed</span>
+                  <small>{booking.service} · {booking.masseuseName}</small>
+                  <code>{booking.paymentReference}</code>
+                  {booking.bookingCode && <code>{booking.bookingCode}</code>}
+                </div>
+              </article>
+            ))}
+          </details>
           <div className="conversation-list-heading">
             <h1>Conversations</h1>
             <span>{conversations.filter((item) => item.status === "open").length} open</span>

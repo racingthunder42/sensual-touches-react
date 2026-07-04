@@ -773,6 +773,27 @@
 
   .payment-queue-item .btn-primary { width: 100%; }
 
+  .payment-history {
+    border-bottom: 1px solid rgba(212,160,23,0.18);
+  }
+
+  .payment-history > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9rem 1.25rem;
+    color: var(--gold-pale);
+    background: rgba(212,160,23,0.04);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 700;
+    list-style: none;
+  }
+
+  .payment-history > summary::-webkit-details-marker { display: none; }
+  .payment-history > summary strong { color: var(--gold); }
+  .payment-queue-item.confirmed { background: rgba(46,196,182,0.05); }
+
   .conversation-list-heading {
     position: sticky;
     top: 0;
