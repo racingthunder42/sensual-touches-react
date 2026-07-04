@@ -1555,17 +1555,7 @@
 
     .nav-links.open { top: 64px; }
 
-    .nav-cta {
-      display: block;
-      position: fixed;
-      left: 1rem;
-      right: 5.6rem;
-      bottom: max(1rem, env(safe-area-inset-bottom));
-      z-index: 1900;
-      padding: 0.8rem 1rem;
-      text-align: center;
-      box-shadow: 0 12px 32px rgba(0,0,0,0.34);
-    }
+    .nav-cta { display: none; }
 
     .hero {
       min-height: 92svh;
