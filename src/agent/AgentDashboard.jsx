@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { agentRequest, apiRequest } from "../lib/chatApi";
-import { isSupabaseConfigured, supabase } from "../lib/supabase";
+import { isPasswordRecoveryLink, isSupabaseConfigured, supabase } from "../lib/supabase";
 
 function mergeConversation(current, incoming) {
   const updated = current.some((item) => item.id === incoming.id)
@@ -61,6 +61,9 @@ export default function AgentDashboard() {
     displayName: "",
     password: "",
   });
+  const [recoveryMode, setRecoveryMode] = useState(isPasswordRecoveryLink);
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [notice, setNotice] = useState("");
   const [conversations, setConversations] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -116,6 +119,10 @@ export default function AgentDashboard() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        if (event === "PASSWORD_RECOVERY") {
+          setRecoveryMode(true);
+          setAuthReady(true);
+        }
         if (event === "TOKEN_REFRESHED" && session) {
           window.sessionStorage.setItem("lotus-agent-token", session.access_token);
           setToken(session.access_token);
@@ -268,6 +275,47 @@ export default function AgentDashboard() {
     }
   };
 
+  const requestPasswordReset = async () => {
+    const email = credentials.agentId.trim();
+    if (!email) {
+      setError("Enter your email address first.");
+      return;
+    }
+    setError("");
+    setNotice("");
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      email,
+      { redirectTo: `${window.location.origin}/agent?reset=1` },
+    );
+    if (resetError) {
+      setError(resetError.message);
+    } else {
+      setNotice("Password recovery email sent. Open the link in that email.");
+    }
+  };
+
+  const saveRecoveredPassword = async (event) => {
+    event.preventDefault();
+    if (recoveryPassword.length < 12) {
+      setError("Password must contain at least 12 characters.");
+      return;
+    }
+    setError("");
+    const { error: updateError } = await supabase.auth.updateUser({
+      password: recoveryPassword,
+    });
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+    window.history.replaceState({}, "", "/agent");
+    setRecoveryMode(false);
+    setRecoveryPassword("");
+    setNotice("Password updated successfully.");
+    const { data: { session } } = await supabase.auth.getSession();
+    await loadSupabaseSession(session);
+  };
+
   const logout = async () => {
     if (isSupabaseConfigured) await supabase.auth.signOut();
     window.sessionStorage.removeItem("lotus-agent-token");
@@ -332,6 +380,32 @@ export default function AgentDashboard() {
     return (
       <main className="agent-login-page">
         <div className="agent-login-card">Checking your invitationâ€¦</div>
+      </main>
+    );
+  }
+
+  if (recoveryMode) {
+    return (
+      <main className="agent-login-page">
+        <form className="agent-login-card" onSubmit={saveRecoveredPassword}>
+          <div className="footer-logo">Sensual touches</div>
+          <p className="section-label">Account recovery</p>
+          <h1>Create a new password</h1>
+          <label htmlFor="recoveryPassword">New password</label>
+          <input
+            id="recoveryPassword"
+            type="password"
+            minLength="12"
+            value={recoveryPassword}
+            onChange={(event) => setRecoveryPassword(event.target.value)}
+            autoComplete="new-password"
+            required
+          />
+          {error && <p className="form-error">{error}</p>}
+          <button className="btn-primary" type="submit">
+            Save New Password
+          </button>
+        </form>
       </main>
     );
   }
@@ -415,9 +489,19 @@ export default function AgentDashboard() {
             required
           />
           {error && <p className="form-error">{error}</p>}
+          {notice && <p>{notice}</p>}
           <button className="btn-primary" type="submit">
             Sign In
           </button>
+          {isSupabaseConfigured && (
+            <button
+              className="btn-outline"
+              type="button"
+              onClick={requestPasswordReset}
+            >
+              Forgot Password?
+            </button>
+          )}
         </form>
       </main>
     );
