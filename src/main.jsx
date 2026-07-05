@@ -3,7 +3,19 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import AgentDashboard from "./agent/AgentDashboard";
 import LegalPage from "./legal/LegalPage";
+import { isAgentAuthCallback } from "./lib/supabase";
 import "./styles.css";
+
+if (
+  isAgentAuthCallback &&
+  !window.location.pathname.startsWith("/agent")
+) {
+  window.history.replaceState(
+    {},
+    "",
+    `/agent${window.location.search}${window.location.hash}`,
+  );
+}
 
 const pathname = window.location.pathname;
 

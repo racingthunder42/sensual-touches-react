@@ -6,9 +6,16 @@ const initialAuthFlowType = new URLSearchParams(
   window.location.hash.slice(1),
 ).get("type");
 
+const initialQuery = new URLSearchParams(window.location.search);
+
 export const isPasswordRecoveryLink =
   initialAuthFlowType === "recovery" ||
-  new URLSearchParams(window.location.search).get("reset") === "1";
+  initialQuery.get("reset") === "1";
+
+export const isAgentAuthCallback =
+  ["invite", "recovery"].includes(initialAuthFlowType) ||
+  ["invite", "recovery"].includes(initialQuery.get("type")) ||
+  initialQuery.get("reset") === "1";
 
 export const supabase =
   supabaseUrl && supabaseAnonKey
